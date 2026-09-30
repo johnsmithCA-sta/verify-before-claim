@@ -10,9 +10,11 @@
 检查项
 ------
   1. 两份判据库文件存在
-  2. 条目数 == 期望（本机与工具链 30 / 远端与接口 26，合计 56）
+  2. 条目数 == **从判据库标题「（N 条）」派生**的期望
+     （⚠️ 标题是**唯一事实源**，本文件**不复述任何具体数字**——复述就是第二处口径，必然漂移）
   3. 每条同时含「现象 / 判据 / 反例」三段，且反例非占位
-  4. 六类失败形态编号 1–6 全部出现
+  4. 失败形态类别**逐份文件**核对齐备（见 CLASS_FILE_MAP）
+     ⚠️ 不能只判「两份合并后的类集合」——那会被跨文件掩护（实测到的假 PASS）
   5. 两份文件的加载元数据齐备（加载条件 / 命中标签）
   6. 条目编号在各自文件内唯一且连续
 
@@ -37,13 +39,26 @@ import shutil
 import sys
 import tempfile
 
-# 期望值：与 SKILL.md「判据库（按需加载）」的声明保持一致。
-# 改动判据库条数时**同步改这里**，否则断言会在下次运行时失败（这是设计意图）。
-EXPECTED = {
-    "判据库-本机与工具链.md": 30,
-    "判据库-远端与接口.md": 26,
+# 期望值的**单一事实源 = 判据库文件标题里的「（N 条）」**。
+# 2026-09-30（v0.1.4）：原先在此硬编码 30/26，判据新增后本处忘记同步 ⇒ 自检长期 FAIL。
+# 现改为运行时从标题派生：**只有标题需要维护**，本脚本不再重复声明口径。
+# ⚠️ 标题缺失或格式不符 ⇒ 直接判 FAIL，**不得静默取默认值**——静默兜底正是本技能要防的假 PASS。
+SPEC = ("判据库-本机与工具链.md", "判据库-远端与接口.md")
+TITLE_COUNT_RE = re.compile(r"（(\d+)\s*条）")
+# 每个失败形态类别**应出现在哪份判据库**里（键 = 类号，值 = 文件名集合）。
+# ⚠️ 为什么不能只查「两份合并后的类集合」：并集会**跨文件互相掩护**——把本机库的整个
+#    「类 7」节删掉，远端库还有同名节，合并集合仍含 7 ⇒ 覆盖检查**静默报 PASS**。
+#    这正是本技能第 6 / 7 类要防的形态：**一处信号被另一处的同类信号掩盖**。
+# ⚠️ 新增类别时必须同步本表；漏登记会被下方「未登记」检查抓住（不会静默放过）。
+CLASS_FILE_MAP = {
+    1: {"判据库-本机与工具链.md"},
+    2: {"判据库-本机与工具链.md"},
+    3: {"判据库-本机与工具链.md", "判据库-远端与接口.md"},
+    4: {"判据库-远端与接口.md"},
+    5: {"判据库-本机与工具链.md", "判据库-远端与接口.md"},
+    6: {"判据库-远端与接口.md"},
+    7: {"判据库-本机与工具链.md", "判据库-远端与接口.md"},
 }
-REQUIRED_CLASSES = {1, 2, 3, 4, 5, 6}
 SECTIONS = ("现象", "判据", "反例")
 REF_META_KEYS = ("加载条件", "命中标签")
 ENTRY_RE = re.compile(r"^###\s+([LR]\d+)\s+(.+)$", re.M)
@@ -71,6 +86,25 @@ def read_frontmatter(text):
     return m.group(1) if m else ""
 
 
+def derive_expected(ref_dir):
+    """从各判据库**标题**派生期望条目数。
+
+    返回 (期望字典, 失败列表)。标题缺「（N 条）」时记入失败 —— 宁可报 FAIL，
+    也不静默用一个猜出来的期望值（**静默兜底 = 假 PASS 的来源**）。
+    """
+    exp, fails = {}, []
+    for fname in SPEC:
+        path = os.path.join(ref_dir, fname)
+        if not os.path.isfile(path):
+            continue  # 缺文件由主流程报
+        m = TITLE_COUNT_RE.search(read(path))
+        if m:
+            exp[fname] = int(m.group(1))
+        else:
+            fails.append("%s 标题未写「（N 条）」，无法派生期望值" % fname)
+    return exp, fails
+
+
 def check(root):
     """返回 (失败列表, 信息行列表)。失败列表非空即判 FAIL。"""
     fails, info = [], []
@@ -79,9 +113,13 @@ def check(root):
     if not os.path.isdir(ref_dir):
         return ["references/ 目录不存在"], info
 
+    exp, exp_fails = derive_expected(ref_dir)
+    fails.extend(exp_fails)
+
     total = 0
-    classes = set()
-    for fname, want in EXPECTED.items():
+    per_file = {}
+    for fname in SPEC:
+        want = exp.get(fname)
         path = os.path.join(ref_dir, fname)
         if not os.path.isfile(path):
             fails.append("缺文件: references/%s" % fname)
@@ -93,18 +131,28 @@ def check(root):
             if key not in fm:
                 fails.append("%s 加载元数据缺「%s」" % (fname, key))
 
-        for num in CLASS_RE.findall(text):
-            classes.add(int(num))
+        per_file[fname] = {int(num) for num in CLASS_RE.findall(text)}
 
         entries = split_entries(text)
         total += len(entries)
-        if len(entries) != want:
-            fails.append("%s 条目数 %d ≠ 期望 %d" % (fname, len(entries), want))
+        if want is None:
+            pass  # 已在 derive_expected 记入 FAIL
+        elif len(entries) != want:
+            fails.append("%s 条目数 %d ≠ 标题派生期望 %d" % (fname, len(entries), want))
 
         nums = [e[0] for e in entries]
         dup = sorted({n for n in nums if nums.count(n) > 1})
         if dup:
             fails.append("%s 编号重复: %s" % (fname, "、".join(dup)))
+
+        # 连续性：只查重复挡不住「删掉一条 + 改标题计数」—— 那样全库静默 PASS，
+        # 而按编号引用单条判据的外部笔记会**静默指向别处**（编号是稳定标识符）。
+        seq = sorted(int(n[1:]) for n in nums)
+        if seq != list(range(1, max(seq) + 1)):
+            gap = [n for n in range(1, max(seq) + 1) if n not in seq]
+            fails.append("%s 编号不连续（缺 %s）—— 编号是稳定标识符，"
+                         "缺号会让按编号的引用静默失配"
+                         % (fname, "、".join(str(g) for g in gap) or "未知"))
 
         for code, title, body in entries:
             for sec in SECTIONS:
@@ -119,18 +167,26 @@ def check(root):
                 )
         info.append("%s: %d 条" % (fname, len(entries)))
 
-    missing = REQUIRED_CLASSES - classes
-    if missing:
-        fails.append(
-            "失败形态覆盖不全，缺: %s"
-            % "、".join("第 %d 类" % c for c in sorted(missing))
-        )
+    # 逐类、逐文件核对（不做合并集合的判断：那会被跨文件掩护，见 CLASS_FILE_MAP 注释）
+    miss, stray = [], []
+    for cls, files in sorted(CLASS_FILE_MAP.items()):
+        for fname in sorted(files):
+            if fname in per_file and cls not in per_file[fname]:
+                miss.append("第 %d 类缺于 %s" % (cls, fname))
+    for fname, got in sorted(per_file.items()):
+        for cls in sorted(got - set(CLASS_FILE_MAP)):
+            stray.append("%s 的「类 %d」未登记进 CLASS_FILE_MAP" % (fname, cls))
+    if miss or stray:
+        fails.append("失败形态覆盖不全: %s" % "、".join(miss + stray))
     else:
-        info.append("失败形态: 1–6 类全覆盖")
+        info.append(
+            "失败形态: 按文件逐类核对齐备（类 %d–%d）"
+            % (min(CLASS_FILE_MAP), max(CLASS_FILE_MAP))
+        )
 
-    want_total = sum(EXPECTED.values())
+    want_total = sum(exp.values())
     if total != want_total:
-        fails.append("判据总数 %d ≠ 期望 %d" % (total, want_total))
+        fails.append("判据总数 %d ≠ 标题派生期望 %d" % (total, want_total))
     else:
         info.append("判据总数: %d 条" % total)
 
