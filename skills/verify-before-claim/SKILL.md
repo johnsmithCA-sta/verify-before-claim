@@ -2,9 +2,13 @@
 name: verify-before-claim
 slug: verify-before-claim
 displayName: 完成声明验证
+display_name: 完成声明验证
+display_name_en: Verify Before Claim
 summary: 宣告「改完/部署完」前，用机械判据证明动作真落到实体上，覆盖七类假成功形态（空结果 / 回显 / 退出码 / HTTP / 元数据 / 探测 / 锚）。核心方法：报 PASS 的检查器必须先自证能报 FAIL —— 先跑必然失败的对照再采信 PASS；多通道少数否决。判据库 76 条自带反例；结论三态（已证 / 已证伪 / 无法判定），弃答合法且被鼓励。交付可落证据包（`evidence_pack.py`）供第三方复跑；`env_fingerprint.py` 判环境可否沿用；`candidate_gate.py` 令新判据反例实跑，跑不出 FAIL 不入库。纯只读零依赖，不依赖模型内部状态。
 description: 对 agent 的完成声明做落地校验：宣告「改完 / 部署完 / 跑完」之前，证明检查手段本身没骗人。覆盖空结果、成功回显、退出码、HTTP 响应体、元数据、探测手段、断言无锚七类假成功形态，横跨本机文件与脚本、远端服务器与 cron、代码仓库、云端文档接口与推送链路。当用户说「没生效 / 改了没变 / 部署了没用 / 跑了但结果不对 / 返回空 / 还是旧的 / 数据没更新 / 看着跑完了但没效果」，或提到「动作幻觉 / 执行幻觉」（自称做完、实际没生效）时使用；断言本身说不清要验什么（「已检查过」「都改完了」「已是最新」）时也用它；多条验证通道结果不一致、或要判断「多处一致」是否可信时也用它；换了机器 / 换了环境、或要沿用别人采集的证据与结论时也用它。不用于页面渲染类故障（页面打不开 / 转圈 / 白屏 / 数字不对）——那属浏览器侧排障，先取浏览器证据定位；也不用于**事实性 / 忠实性**幻觉的核查（内容有没有编造、摘要是否忠于原文）——那属语义核查。
-version: 0.4.1
+description_zh: 对 Agent 的完成声明做落地校验：宣告「改完 / 部署完 / 跑完」之前，先证明检查手段本身没骗人。覆盖空结果、成功回显、退出码、HTTP 响应体、元数据、探测手段、断言无锚七类假成功形态，横跨本机文件与脚本、远端服务器与 cron、代码仓库、云端文档接口与推送链路。当用户说「没生效 / 改了没变 / 部署了没用 / 跑了但结果不对 / 返回空 / 还是旧的 / 数据没更新 / 看着跑完了但没效果」，或提到「动作幻觉 / 执行幻觉」（自称做完、实际没生效）时使用。核心方法：报 PASS 的检查器必须先自证能报 FAIL —— 先跑必然失败的对照再采信 PASS；多通道验证要求通道独立性与少数否决。判据库 76 条自带反例，结论按三态输出（已证 / 已证伪 / 无法判定），弃答合法。交付可复跑的证据包与环境指纹，纯只读零依赖。
+description_en: Ground-truth verification for agent completion claims - before saying "done", prove the check behind it cannot lie. Covers seven classes of false success (empty results, success echoes, exit codes, HTTP response bodies, metadata, probe artifacts, anchorless assertions) across local files and scripts, remote servers and cron, code repositories, cloud document APIs and push pipelines. Use it when a user says "nothing changed / the deploy did nothing / it ran but the result is wrong / it returned empty", or mentions action hallucination (claimed done, never took effect). Core rule - a checker reporting PASS must first prove it can report FAIL - run a known-failing control before trusting a PASS; multi-channel checks require channel independence and minority veto. Ships 76 criteria each with its own counterexample, tri-state verdicts (proven / disproven / undetermined), a re-runnable evidence pack and an environment fingerprint. Read-only, zero dependency.
+version: 0.4.2
 license: MIT
 author: johnsmithCA-sta
 homepage: https://github.com/johnsmithCA-sta/verify-before-claim
@@ -30,10 +34,10 @@ Agent 的执行链上有一类故障不报错：命令返回 0、工具回显成
 本技能提供一套机械判据，在说出「完成」之前，先证明「检查通过」这件事本身不是假象。
 
 **为什么不是「让模型再看一遍」**：让模型当判官，识别「错」的能力极弱——互评场景下
-识别错误的 TNR **不足 25%**，一对一错时勉强好过抛硬币；而规则式检查的假阳性近零。
+识别错误的 TNR（真阴性率）**不足 25%**，一对一错时勉强好过抛硬币；而规则式检查的假阳性极低。
 **判官的同意偏差，正是这类故障长期存活的原因。** 所以本技能不设 LLM 判官、不采信自报置信度、
 不读 logprobs（该信号正从主流模型退场），只读实体的真实状态，判据全部落在
-「**能不能落回一条命令去读**」上，不随任何一家 provider 的策略失效。
+「**能不能落回一条命令去读**」上，不随厂商的策略变化而失效。
 
 **它只管一类幻觉**：声称做了而实际没生效的**动作幻觉**；事实性 / 忠实性幻觉不在此列
 （那需要联网与知识源，会毁掉零依赖定位）。依据、边界与**五条显式盲区**见 `references/依据与边界.md`。
@@ -128,6 +132,7 @@ Agent 的执行链上有一类故障不报错：命令返回 0、工具回显成
 - **质量门槛**：每条结论须能追到一条命令 + 一段原始输出；阴性对照未过**不得**采信任何 PASS；三态措辞**不得混用**。
 - **逃逸条款**：要求与用户意图冲突、或环境不允许做该对照时，优先保障用户意图，
   并**显式说明偏离理由**与替代动作——不得静默偏离。
+- **AI 标识**：本技能的判据与输出由 AI 生成，**仅供参考**；关键结论请人工复核后再用于生产决策。
 
 ## 七类失败形态（判据索引）
 
